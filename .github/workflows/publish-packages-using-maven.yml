@@ -1,0 +1,65 @@
+name: Publish packages using maven
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        required: true
+        type: choice
+        options:
+          - arc-runner-axccoe
+          - self-hosted
+          - ubuntu-latest
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "SNAPSHOT"
+        type: choice
+        options:
+          - SNAPSHOT
+          - RELEASE
+
+jobs:
+  ci:
+    name: (${{ inputs.environment }}) Publish packages using maven
+    runs-on: "${{ inputs.runner }}"
+    
+    steps:
+      # - name: Cache Maven packages
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/.m2/repository
+      #     key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-maven-
+
+      # - name: Set up jdk 17
+      #   uses: actions/setup-java@v4
+      #   with:
+      #     java-version: '17'
+      #     distribution: 'temurin'
+      #     cache: maven
+
+      - name: Check out the repo
+        # uses: actions/checkout@v4.1.7
+        uses: ./../../common/actions/checkout-v4.1.7
+        with:
+          fetch-depth: 1
+          # path: ${{ github.event.repository.name }}-${{ github.ref_name }}
+
+      - name: Configure maven settings.xml
+        run: |
+          cat <<EOF > ./settings.xml
+          <settings>
+            <servers>
+              <server>
+                <id>github</id>
+                <username>${{ github.actor }}</username>
+                <password>${{ secrets.GH_ADMIN_TOKEN }}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+  
+      - name: Package and deploy jar file
+        run: mvn -U deploy -DskipTests -s ./settings.xml -Dversion.suffix=${{ inputs.environment }}

@@ -1,0 +1,79 @@
+name: Publish packages using container
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        required: true
+        type: choice
+        options:
+          - arc-runner-axccoe
+          - self-hosted
+          - ubuntu-latest
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "SNAPSHOT"
+        type: choice
+        options:
+          - SNAPSHOT
+          - RELEASE
+
+jobs:
+  ci:
+    name: (${{ inputs.environment }}) Publish packages using container
+    runs-on: "${{ inputs.runner }}"
+    
+    steps:
+      - name: Check out the repo
+        # uses: actions/checkout@v4.1.7
+        uses: ./../../common/actions/checkout-v4.1.7
+        with:
+          fetch-depth: 1
+          # path: ${{ github.event.repository.name }}-${{ github.ref_name }}
+
+      - name: Configure maven settings.xml
+        run: |
+          cat <<EOF > ./settings.xml
+          <settings>
+            <servers>
+              <server>
+                <id>github</id>
+                <username>${{ github.actor }}</username>
+                <password>${{ secrets.GH_ADMIN_TOKEN }}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+
+      - name: Log in to Azure CLI
+        env:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          echo "$AZURE_CREDENTIALS" > azure_credentials.json
+          az login \
+            --service-principal \
+            --username $(jq -r .clientId azure_credentials.json) \
+            --password $(jq -r .clientSecret azure_credentials.json) \
+            --tenant $(jq -r .tenantId azure_credentials.json)
+          az account set --subscription $(jq -r .subscriptionId azure_credentials.json)
+
+      - name: Login to ACR Private
+        run: |
+          az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Set up Docker Buildx
+        # uses: docker/setup-buildx-action@v3.6.1
+        uses: ./../../common/docker/setup-buildx-action-v3.6.1
+
+      - name: Package and deploy jar file using container
+        # uses: docker/build-push-action@v6.5.0
+        uses: ./../../common/docker/build-push-action-v6.5.0
+        with:
+          context: .
+          file: ./Dockerfile
+          build-args: |
+            VERSION_SUFFIX=${{ inputs.environment }}
+          push: false
+          cache-from: type=registry,ref=${{ vars.ACR_LOGIN_SERVER }}/${{ vars.ACR_REPOSITORY }}-cache
+          cache-to: type=registry,ref=${{ vars.ACR_LOGIN_SERVER }}/${{ vars.ACR_REPOSITORY }}-cache,mode=max
